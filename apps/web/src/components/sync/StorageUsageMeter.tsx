@@ -40,13 +40,19 @@ export function StorageUsageMeter({
     variant,
     className,
 }: StorageUsageMeterProps) {
-    const { localQuotaStatus, cloudQuotaStatus, syncState, isConvexAvailable } =
-        useSync();
+    const {
+        localQuotaStatus,
+        cloudQuotaStatus,
+        syncState,
+        isConvexAvailable,
+        isCloudflareAvailable,
+    } = useSync();
 
     // Hide cloud meter if not in cloud-enabled state or Convex not available
     if (
         variant === "cloud" &&
-        (!isConvexAvailable || syncState !== "cloud-enabled")
+        ((!isConvexAvailable && !isCloudflareAvailable) ||
+            syncState !== "cloud-enabled")
     ) {
         return null;
     }

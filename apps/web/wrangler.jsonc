@@ -1,0 +1,30 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "routerchat-web",
+    "compatibility_date": "2026-09-26",
+    "compatibility_flags": ["nodejs_compat"],
+    "vars": {
+        "CLOUDFLARE_ACCESS_TEAM_DOMAIN": "https://your-team.cloudflareaccess.com",
+        "CLOUDFLARE_ACCESS_AUD": "replace-with-your-access-application-audience",
+    },
+    "d1_databases": [
+        {
+            "binding": "DB",
+            "database_name": "routerchat-db",
+            "database_id": "00000000-0000-0000-0000-000000000000",
+            "migrations_dir": "migrations",
+        },
+    ],
+    "r2_buckets": [
+        {
+            "binding": "ATTACHMENTS",
+            "bucket_name": "routerchat-attachments",
+        },
+    ],
+    "main": "vinext/server/fetch-handler",
+    "assets": {
+        "directory": "dist/client",
+        "not_found_handling": "none",
+        "binding": "ASSETS",
+    },
+}

@@ -49,3 +49,8 @@ export function getConvexUrl(): string | null {
 export function isServer(): boolean {
     return typeof window === "undefined";
 }
+
+/** True in the Cloudflare Workers build, injected by `vite.config.ts`. */
+export function isCloudflareSyncEnabled(): boolean {
+    return process.env.NEXT_PUBLIC_CLOUDFLARE_SYNC_ENABLED === "true";
+}

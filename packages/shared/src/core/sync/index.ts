@@ -76,6 +76,9 @@ export interface StorageAdapter {
     deleteSkill(id: string): Promise<void>;
     getSkillSettings(): Promise<SkillSettings>;
     upsertSkillSettings(settings: SkillSettingsUpdate): Promise<void>;
+
+    /** Optional cloud-only cleanup supported by adapters with remote blobs. */
+    clearCloudImages?(): Promise<void>;
 }
 
 export type StorageAdapterFactory = () => StorageAdapter;

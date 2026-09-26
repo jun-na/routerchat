@@ -32,6 +32,7 @@ export function SettingsLocalData() {
         cloudStorageUsage,
         clearCloudImages,
         isConvexAvailable,
+        isCloudflareAvailable,
         localQuotaStatus,
         refreshQuotaStatus,
     } = useSync();
@@ -212,7 +213,7 @@ export function SettingsLocalData() {
                         </div>
                     )}
 
-                    {isConvexAvailable &&
+                    {(isConvexAvailable || isCloudflareAvailable) &&
                         cloudQuotaStatus &&
                         cloudStorageUsage && (
                             <div className="space-y-4 border-t border-border/60 pt-4">

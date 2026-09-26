@@ -27,21 +27,21 @@ export function useCloudAdapter(
 }
 
 export function useActiveStorageAdapter(params: {
-    cloudAdapter: ConvexStorageAdapter | null;
-    isConvexAvailable: boolean;
+    cloudAdapter: StorageAdapter | null;
+    isCloudAvailable: boolean;
     syncState: SyncState;
     isAuthenticated: boolean;
 }): StorageAdapter {
-    const { cloudAdapter, isConvexAvailable, syncState, isAuthenticated } =
+    const { cloudAdapter, isCloudAvailable, syncState, isAuthenticated } =
         params;
 
     return useMemo(() => {
         const canUseCloud =
-            isConvexAvailable &&
+            isCloudAvailable &&
             syncState === "cloud-enabled" &&
             isAuthenticated &&
             cloudAdapter;
 
         return canUseCloud ? cloudAdapter : getLocalStorageAdapter();
-    }, [cloudAdapter, isConvexAvailable, isAuthenticated, syncState]);
+    }, [cloudAdapter, isCloudAvailable, isAuthenticated, syncState]);
 }

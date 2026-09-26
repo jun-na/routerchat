@@ -105,13 +105,160 @@ export function getCloudAutoEnableDecision(
 }
 
 export function CloudSyncSettings({ highlightEnable }: CloudSyncSettingsProps) {
-    const { isConvexAvailable } = useSync();
+    const { isConvexAvailable, isCloudflareAvailable } = useSync();
+
+    if (isCloudflareAvailable) {
+        return (
+            <CloudflareCloudSyncSettings highlightEnable={highlightEnable} />
+        );
+    }
 
     if (!isConvexAvailable) {
         return null;
     }
 
     return <CloudSyncSettingsContent highlightEnable={highlightEnable} />;
+}
+
+function CloudflareCloudSyncSettings({
+    highlightEnable,
+}: CloudSyncSettingsProps) {
+    const {
+        syncState,
+        cloudflareIdentity,
+        enableCloudSync,
+        disableCloudSync,
+        isMigrating,
+        migrationProgress,
+    } = useSync();
+    const [showEnableConfirm, setShowEnableConfirm] = useState(false);
+    const [showDisableConfirm, setShowDisableConfirm] = useState(false);
+    const [isLoading, setIsLoading] = useState(false);
+    const [highlightCta, setHighlightCta] = useState(false);
+
+    useEffect(() => {
+        if (!highlightEnable) return;
+        const animationFrame = window.requestAnimationFrame(() => {
+            setHighlightCta(true);
+        });
+        const timeout = window.setTimeout(() => setHighlightCta(false), 4000);
+        return () => {
+            window.cancelAnimationFrame(animationFrame);
+            window.clearTimeout(timeout);
+        };
+    }, [highlightEnable]);
+
+    const handleEnable = async () => {
+        setShowEnableConfirm(false);
+        setIsLoading(true);
+        try {
+            await enableCloudSync();
+        } catch (error) {
+            console.error("Failed to enable Cloudflare sync:", error);
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleDisable = async () => {
+        setShowDisableConfirm(false);
+        try {
+            await disableCloudSync();
+        } catch (error) {
+            console.error("Failed to disable Cloudflare sync:", error);
+        }
+    };
+
+    return (
+        <section className="card-deco mb-6">
+            <div className="flex items-center gap-3 mb-4">
+                <div className="w-8 h-8 bg-primary/10 flex items-center justify-center">
+                    <Cloud size={16} className="text-primary" />
+                </div>
+                <h2 className="text-lg font-medium">Cloudflare Storage</h2>
+            </div>
+            <p className="text-sm text-muted-foreground mb-4 leading-relaxed">
+                Store conversations in your Cloudflare D1 database and file
+                attachments in R2. Cloudflare Access controls account access.
+            </p>
+
+            <div className="flex items-center justify-between text-xs border border-border bg-muted/30 px-4 py-3 rounded-sm mb-4">
+                <span className="text-muted-foreground">
+                    {cloudflareIdentity?.email ?? "Cloudflare Access"}
+                </span>
+                <span className="font-medium">
+                    {syncState === "cloud-enabled"
+                        ? "Cloud Sync Enabled"
+                        : syncState === "cloud-disabled"
+                          ? "Cloud Sync Disabled"
+                          : "Local Only"}
+                </span>
+            </div>
+
+            {syncState === "cloud-enabled" ? (
+                <button
+                    type="button"
+                    onClick={() => setShowDisableConfirm(true)}
+                    className="btn-deco-ghost w-full text-muted-foreground cursor-pointer py-3"
+                >
+                    Disable Cloud Sync on This Device
+                </button>
+            ) : (
+                <button
+                    type="button"
+                    onClick={() => setShowEnableConfirm(true)}
+                    disabled={isLoading || isMigrating}
+                    className={cn(
+                        "btn-deco-primary w-full flex items-center justify-center gap-2 py-3",
+                        highlightCta && "ring-2 ring-primary/50",
+                        (isLoading || isMigrating) &&
+                            "cursor-not-allowed opacity-70",
+                    )}
+                >
+                    {isLoading || isMigrating ? (
+                        <>
+                            <Loader2 size={16} className="animate-spin" />
+                            <span>
+                                {isMigrating
+                                    ? `Copying local data... ${migrationProgress ? Math.round(migrationProgress.percentage) : 0}%`
+                                    : "Loading..."}
+                            </span>
+                        </>
+                    ) : (
+                        <>
+                            <Cloud size={16} />
+                            <span>Enable Cloud Sync</span>
+                        </>
+                    )}
+                </button>
+            )}
+
+            {syncState === "cloud-enabled" && (
+                <div className="mt-4">
+                    <CloneToLocalButton className="text-muted-foreground" />
+                </div>
+            )}
+
+            <ConfirmDialog
+                open={showEnableConfirm}
+                title="Enable Cloudflare Sync"
+                description="Local chats, messages, skills, and attachments will be copied to your Cloudflare account. Existing cloud records with matching IDs will be updated."
+                confirmLabel="Copy and Enable"
+                cancelLabel="Cancel"
+                onConfirm={handleEnable}
+                onCancel={() => setShowEnableConfirm(false)}
+            />
+            <ConfirmDialog
+                open={showDisableConfirm}
+                title="Disable Cloud Sync"
+                description="This device will use local storage until sync is enabled again. Data already stored in Cloudflare will remain there."
+                confirmLabel="Disable Cloud Sync"
+                cancelLabel="Cancel"
+                onConfirm={handleDisable}
+                onCancel={() => setShowDisableConfirm(false)}
+            />
+        </section>
+    );
 }
 
 function CloudSyncSettingsContent({
@@ -157,9 +304,14 @@ function CloudSyncSettingsContent({
 
     useEffect(() => {
         if (!highlightEnable) return;
-        setHighlightCta(true);
+        const animationFrame = window.requestAnimationFrame(() => {
+            setHighlightCta(true);
+        });
         const timeout = window.setTimeout(() => setHighlightCta(false), 4000);
-        return () => window.clearTimeout(timeout);
+        return () => {
+            window.cancelAnimationFrame(animationFrame);
+            window.clearTimeout(timeout);
+        };
     }, [highlightEnable]);
 
     useEffect(() => {
@@ -448,7 +600,7 @@ function CloudSyncSettingsContent({
                     setShowSignInConfirm(false);
                     if (signIn) {
                         storage.setSyncAutoEnableReason("login");
-                        signIn("google", { redirectTo: "/settings" });
+                        void signIn("google", { redirectTo: "/settings" });
                     }
                 }}
                 onCancel={() => setShowSignInConfirm(false)}

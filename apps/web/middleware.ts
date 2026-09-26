@@ -95,9 +95,9 @@ export function middleware(request: NextRequest) {
         const csp: string[] = [
             "default-src 'self'",
             `script-src ${scriptSrc}`,
-            "style-src 'self' 'unsafe-inline'",
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
             "img-src 'self' data: blob:",
-            "font-src 'self' data:",
+            "font-src 'self' data: https://fonts.gstatic.com",
             "connect-src 'self' https: wss:",
             "base-uri 'none'",
             "object-src 'none'",

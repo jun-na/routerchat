@@ -2,10 +2,8 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api } from "@convex/_generated/api";
-import type {
-    ConvexClient,
-    ConvexStorageAdapter,
-} from "@/lib/sync/convex-adapter";
+import type { ConvexClient } from "@/lib/sync/convex-adapter";
+import type { StorageAdapter } from "@/lib/sync/storage-adapter";
 import { clearCloudAttachmentCaches } from "@/lib/sync/convex-adapter";
 import { clearCloudImagesAndRefresh } from "@/lib/sync/clear-cloud-images";
 import { getCloudQuotaStatus } from "@/lib/sync/quota";
@@ -18,7 +16,7 @@ import {
 } from "@shared/core/quota";
 
 export function useQuotaStatus(params: {
-    cloudAdapter: ConvexStorageAdapter | null;
+    cloudAdapter: StorageAdapter | null;
     convexClient?: ConvexClient | null;
     isAuthenticated: boolean;
     onCloudImagesCleared?: () => void;
@@ -121,13 +119,20 @@ export function useQuotaStatus(params: {
     ]);
 
     const clearCloudImages = useCallback(async () => {
+        if (cloudAdapter?.clearCloudImages) {
+            await cloudAdapter.clearCloudImages();
+            onCloudImagesCleared?.();
+            await refreshQuotaStatus();
+            return;
+        }
+
         await clearCloudImagesAndRefresh({
             convexClient,
             clearAttachmentCaches: clearCloudAttachmentCaches,
             onCloudImagesCleared,
             refreshQuotaStatus,
         });
-    }, [convexClient, onCloudImagesCleared, refreshQuotaStatus]);
+    }, [cloudAdapter, convexClient, onCloudImagesCleared, refreshQuotaStatus]);
 
     useEffect(() => {
         queueMicrotask(() => {

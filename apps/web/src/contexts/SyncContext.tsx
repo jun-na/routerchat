@@ -30,6 +30,7 @@ import {
     runCloneCloudToLocal,
     runEnableCloudSyncMigration,
 } from "@/lib/sync/migration-runner";
+import { CloudflareStorageAdapter } from "@/lib/sync/cloudflare-adapter";
 import { useQuotaStatus } from "@/lib/sync/quota-status";
 import {
     applySyncStateChange,
@@ -40,6 +41,10 @@ import {
 import * as storage from "@/lib/storage";
 import type { StorageAdapter } from "@/lib/sync/storage-adapter";
 import { LoadingScreen } from "@/components/ui/LoadingScreen";
+import { isCloudflareSyncEnabled } from "@/lib/sync/config";
+import type { CloudflareIdentity } from "@/lib/cloudflare/access";
+import { runClone, runMigration } from "@shared/core/sync";
+import { getLocalStorageAdapter } from "@/lib/sync/local-adapter";
 
 /**
  * Sync Context Type
@@ -50,6 +55,8 @@ interface SyncContextType {
     // State
     syncState: SyncState;
     isConvexAvailable: boolean;
+    isCloudflareAvailable: boolean;
+    cloudflareIdentity: CloudflareIdentity | null;
     isAuthenticated: boolean;
     syncMetadata: SyncMetadata;
 
@@ -85,6 +92,7 @@ interface SyncContextType {
 }
 
 const SyncContext = createContext<SyncContextType | null>(null);
+const cloudflareStorageAdapter = new CloudflareStorageAdapter();
 
 /**
  * Sync Provider
@@ -93,6 +101,14 @@ const SyncContext = createContext<SyncContextType | null>(null);
  * storage adapter based on the current sync state.
  */
 export function SyncProvider({ children }: { children: React.ReactNode }) {
+    if (isCloudflareSyncEnabled()) {
+        return <CloudflareSyncProvider>{children}</CloudflareSyncProvider>;
+    }
+
+    return <ConvexSyncProvider>{children}</ConvexSyncProvider>;
+}
+
+function ConvexSyncProvider({ children }: { children: React.ReactNode }) {
     const convexAvailability = useSyncExternalStore(
         convexAvailabilityStore.subscribe,
         convexAvailabilityStore.getSnapshot,
@@ -117,6 +133,51 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         >
             {children}
         </SyncProviderWithAuth>
+    );
+}
+
+function CloudflareSyncProvider({ children }: { children: React.ReactNode }) {
+    const [isLoading, setIsLoading] = useState(true);
+    const [identity, setIdentity] = useState<CloudflareIdentity | null>(null);
+    const adapter = identity ? cloudflareStorageAdapter : null;
+
+    useEffect(() => {
+        let active = true;
+        void fetch("/api/cloudflare/session", { cache: "no-store" })
+            .then(async (response) => {
+                if (!response.ok)
+                    throw new Error("Cloudflare session unavailable");
+                const body = (await response.json()) as {
+                    identity?: CloudflareIdentity;
+                };
+                if (!body.identity?.userId || !body.identity.email) {
+                    throw new Error("Cloudflare session is invalid");
+                }
+                if (active) setIdentity(body.identity);
+            })
+            .catch(() => {
+                if (active) setIdentity(null);
+            })
+            .finally(() => {
+                if (active) setIsLoading(false);
+            });
+        return () => {
+            active = false;
+        };
+    }, []);
+
+    if (isLoading) return <LoadingScreen />;
+
+    return (
+        <SyncProviderBase
+            isConvexAvailable={false}
+            isCloudflareAvailable={Boolean(identity)}
+            cloudflareIdentity={identity}
+            cloudflareAdapter={adapter}
+            isAuthenticated={Boolean(identity)}
+        >
+            {children}
+        </SyncProviderBase>
     );
 }
 
@@ -149,6 +210,9 @@ function SyncProviderWithAuth({
 function SyncProviderBase({
     children,
     isConvexAvailable,
+    isCloudflareAvailable = false,
+    cloudflareIdentity = null,
+    cloudflareAdapter = null,
     convexClient,
     convexUserId,
     initialSync,
@@ -157,6 +221,9 @@ function SyncProviderBase({
 }: {
     children: React.ReactNode;
     isConvexAvailable: boolean;
+    isCloudflareAvailable?: boolean;
+    cloudflareIdentity?: CloudflareIdentity | null;
+    cloudflareAdapter?: StorageAdapter | null;
     convexClient?: ConvexClient | null;
     convexUserId?: Id<"users"> | null;
     initialSync?: boolean;
@@ -175,14 +242,16 @@ function SyncProviderBase({
         setCloudAdapterEpoch((prev) => prev + 1);
     }, []);
 
-    const cloudAdapter = useCloudAdapter(
+    const convexCloudAdapter = useCloudAdapter(
         convexClient,
         convexUserId,
         cloudAdapterEpoch,
     );
+    const cloudAdapter = cloudflareAdapter ?? convexCloudAdapter;
+    const isCloudAvailable = isConvexAvailable || isCloudflareAvailable;
     const storageAdapter = useActiveStorageAdapter({
         cloudAdapter,
-        isConvexAvailable,
+        isCloudAvailable,
         syncState,
         isAuthenticated,
     });
@@ -217,30 +286,51 @@ function SyncProviderBase({
         const storedState = storage.getSyncState();
         const storedMetadata = storage.getSyncMetadata();
         const resolved = resolveStoredSyncState({
-            isConvexAvailable,
+            isConvexAvailable: isCloudAvailable,
             storedState,
             storedMetadata,
         });
+        const isCloudflareAccountChanged =
+            isCloudflareAvailable &&
+            Boolean(cloudflareIdentity?.userId) &&
+            Boolean(storedMetadata.cloudUserId) &&
+            storedMetadata.cloudUserId !== cloudflareIdentity?.userId;
+        const nextSyncState = isCloudflareAccountChanged
+            ? "cloud-disabled"
+            : resolved.syncState;
+        const nextSyncMetadata = isCloudflareAccountChanged
+            ? { ...resolved.syncMetadata, syncState: "cloud-disabled" as const }
+            : resolved.syncMetadata;
 
-        setSyncStateInternal(resolved.syncState);
-        setSyncMetadataInternal(resolved.syncMetadata);
+        if (isCloudflareAccountChanged) {
+            storage.setSyncState(nextSyncState);
+            storage.updateSyncMetadata(nextSyncMetadata);
+        }
+
+        setSyncStateInternal(nextSyncState);
+        setSyncMetadataInternal(nextSyncMetadata);
 
         setIsStorageHydrated(true);
-    }, [isConvexAvailable]);
+    }, [cloudflareIdentity?.userId, isCloudAvailable, isCloudflareAvailable]);
 
     // Update sync state and persist
-    const updateSyncState = useCallback((newState: SyncState) => {
-        setSyncStateInternal(newState);
-        storage.setSyncState(newState);
+    const updateSyncState = useCallback(
+        (newState: SyncState) => {
+            setSyncStateInternal(newState);
+            storage.setSyncState(newState);
 
-        const updatedMetadata = storage.updateSyncMetadata(
-            applySyncStateChange({
+            const nextMetadata = applySyncStateChange({
                 previousMetadata: storage.getSyncMetadata(),
                 nextState: newState,
-            }),
-        );
-        setSyncMetadataInternal(updatedMetadata);
-    }, []);
+            });
+            if (isCloudflareAvailable && cloudflareIdentity) {
+                nextMetadata.cloudUserId = cloudflareIdentity.userId;
+            }
+            const updatedMetadata = storage.updateSyncMetadata(nextMetadata);
+            setSyncMetadataInternal(updatedMetadata);
+        },
+        [cloudflareIdentity, isCloudflareAvailable],
+    );
 
     // Disable cloud sync when signed out
     useEffect(() => {
@@ -260,7 +350,9 @@ function SyncProviderBase({
 
     // Enable cloud sync (local-only -> cloud-enabled)
     const enableCloudSync = useCallback(async () => {
-        if (!isConvexAvailable) {
+        const isCloudflare =
+            isCloudflareAvailable && Boolean(cloudflareAdapter);
+        if (!isCloudAvailable) {
             throw new Error("Convex is not configured");
         }
 
@@ -274,11 +366,11 @@ function SyncProviderBase({
             throw new Error("Sign in required for cloud sync");
         }
 
-        if (initialSync === undefined) {
+        if (isConvexAvailable && initialSync === undefined) {
             return;
         }
 
-        if (!cloudAdapter || !convexClient) {
+        if (!cloudAdapter || (!isCloudflare && !convexClient)) {
             throw new Error("Cloud storage is not available");
         }
 
@@ -291,17 +383,28 @@ function SyncProviderBase({
         });
 
         try {
-            if (!convexUserId) {
-                throw new Error("User not loaded");
-            }
+            if (isCloudflare) {
+                await runMigration(
+                    {
+                        sourceAdapter: getLocalStorageAdapter(),
+                        targetAdapter: cloudAdapter,
+                        onProgress: setMigrationProgress,
+                    },
+                    { clearTargetFirst: false },
+                );
+            } else {
+                if (!convexUserId || !convexClient) {
+                    throw new Error("User not loaded");
+                }
 
-            await runEnableCloudSyncMigration({
-                initialSync,
-                convexClient,
-                convexUserId,
-                cloudAdapter,
-                setMigrationProgress,
-            });
+                await runEnableCloudSyncMigration({
+                    initialSync: Boolean(initialSync),
+                    convexClient,
+                    convexUserId,
+                    cloudAdapter: convexCloudAdapter!,
+                    setMigrationProgress,
+                });
+            }
 
             updateSyncState("cloud-enabled");
             storage.updateSyncMetadata({
@@ -316,7 +419,11 @@ function SyncProviderBase({
         }
     }, [
         cloudAdapter,
+        cloudflareAdapter,
+        isCloudAvailable,
+        isCloudflareAvailable,
         convexClient,
+        convexCloudAdapter,
         convexUserId,
         initialSync,
         isAuthenticated,
@@ -377,17 +484,30 @@ function SyncProviderBase({
                 throw new Error("Cloud storage is not available");
             }
 
-            if (!convexClient) {
-                throw new Error("Convex is not configured");
-            }
-
             try {
-                await runCloneCloudToLocal({
-                    convexClient,
-                    cloudAdapter,
-                    options,
-                    setCloneProgress,
-                });
+                if (isCloudflareAvailable) {
+                    await runClone({
+                        sourceAdapter: cloudAdapter,
+                        targetAdapter: getLocalStorageAdapter(),
+                        options: {
+                            includeChats: true,
+                            includeMessages: true,
+                            includeAttachments: !options?.textOnly,
+                            includeSkills: true,
+                        },
+                        onProgress: setCloneProgress,
+                    });
+                } else {
+                    if (!convexClient) {
+                        throw new Error("Convex is not configured");
+                    }
+                    await runCloneCloudToLocal({
+                        convexClient,
+                        cloudAdapter: convexCloudAdapter!,
+                        options,
+                        setCloneProgress,
+                    });
+                }
                 await refreshQuotaStatus();
             } catch (error) {
                 console.error("Clone to local failed:", error);
@@ -399,21 +519,26 @@ function SyncProviderBase({
         },
         [
             cloudAdapter,
+            convexCloudAdapter,
             convexClient,
+            isCloudflareAvailable,
             isAuthenticated,
             refreshQuotaStatus,
             syncState,
         ],
     );
 
-    const isInitialSyncLoaded = !isConvexAvailable || initialSync !== undefined;
+    const isInitialSyncLoaded =
+        !isConvexAvailable ||
+        initialSync !== undefined ||
+        isCloudflareAvailable;
 
     // During refresh, prevent loading local data when cloud sync is enabled by
     // gating the app behind a full-screen loader until cloud availability is
     // resolved and the cloud adapter is ready.
     const shouldBlockChildren =
         !isStorageHydrated ||
-        (isConvexAvailable &&
+        (isCloudAvailable &&
             syncState === "cloud-enabled" &&
             (isAuthLoading || !isAuthenticated || !cloudAdapter));
 
@@ -421,6 +546,8 @@ function SyncProviderBase({
         () => ({
             syncState,
             isConvexAvailable,
+            isCloudflareAvailable,
+            cloudflareIdentity,
             isAuthenticated,
             syncMetadata,
             storageAdapter,
@@ -441,6 +568,8 @@ function SyncProviderBase({
         [
             syncState,
             isConvexAvailable,
+            isCloudflareAvailable,
+            cloudflareIdentity,
             isAuthenticated,
             syncMetadata,
             storageAdapter,
@@ -482,8 +611,9 @@ export function useSync(): SyncContextType {
  * Hook to check if cloud sync is available (Convex configured + signed in)
  */
 export function useIsCloudSyncAvailable(): boolean {
-    const { isConvexAvailable, isAuthenticated } = useSync();
-    return isConvexAvailable && isAuthenticated;
+    const { isConvexAvailable, isCloudflareAvailable, isAuthenticated } =
+        useSync();
+    return (isConvexAvailable || isCloudflareAvailable) && isAuthenticated;
 }
 
 /**

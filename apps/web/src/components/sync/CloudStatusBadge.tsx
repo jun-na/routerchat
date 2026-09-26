@@ -11,10 +11,15 @@ import { cn } from "@/lib/utils";
  * Hidden when Convex is not configured (local-only mode).
  */
 export function CloudStatusBadge() {
-    const { syncState, isConvexAvailable, isMigrating, isCloning } = useSync();
+    const {
+        syncState,
+        isConvexAvailable,
+        isCloudflareAvailable,
+        isMigrating,
+        isCloning,
+    } = useSync();
 
-    // Hide when Convex is not available
-    if (!isConvexAvailable) {
+    if (!isConvexAvailable && !isCloudflareAvailable) {
         return null;
     }
 
