@@ -1,6 +1,7 @@
 {
     "$schema": "node_modules/wrangler/config-schema.json",
     "name": "routerchat-web",
+    "account_id": "4c109dde8c985327b0098cf1dd55e84a",
     "compatibility_date": "2026-09-26",
     "compatibility_flags": ["nodejs_compat"],
     "vars": {
@@ -11,7 +12,7 @@
         {
             "binding": "DB",
             "database_name": "routerchat-db",
-            "database_id": "00000000-0000-0000-0000-000000000000",
+            "database_id": "7968b4c8-14df-4c4e-b2d1-9b71882dad99",
             "migrations_dir": "migrations",
         },
     ],

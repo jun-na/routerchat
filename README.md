@@ -70,18 +70,18 @@ The Cloudflare build runs the app on Workers, stores chats/messages/skills in D1
 
 The Workers build uses vinext, currently in beta. The existing `next dev` workflow remains available for local-only development.
 
-Cloudflare Access requires a custom domain on your Cloudflare zone. Protect the app hostname with a Self-hosted Access application and an allow policy for the users who can access it. Requests made through an unprotected `workers.dev` hostname cannot sync because they do not carry a valid Access JWT.
+Cloudflare Access can protect the Worker's `workers.dev` hostname or a custom domain. Protect the entire Worker or its hostname with an allow policy for the users who can access it. Requests made through an unprotected hostname cannot sync because they do not carry a valid Access JWT.
 
 ### Create the Cloudflare resources
 
-From `apps/web`, create a D1 database and an R2 bucket:
+The D1 database and schema referenced by the committed `wrangler.jsonc` already exist. To deploy under another Cloudflare account, create a D1 database and R2 bucket from `apps/web`:
 
 ```bash
 bun run cf:d1:create
 bun run cf:r2:create
 ```
 
-Copy the D1 `database_id` printed by Wrangler into `apps/web/wrangler.jsonc`, replacing the all-zero placeholder. Apply the D1 migration:
+Update the `account_id` and D1 `database_id` in `apps/web/wrangler.jsonc`, then apply the D1 migration:
 
 ```bash
 bun run cf:d1:migrate:remote
@@ -98,8 +98,8 @@ bun run build:vinext
 bun run deploy:vinext
 ```
 
-2. Add a custom domain to the Worker.
-3. In Cloudflare Zero Trust, create a Self-hosted Access application for the entire hostname and restrict it with your identity provider policy.
+2. In Workers & Pages, open the Worker’s **Access** tab and protect **All traffic**, or create a Self-hosted Access application for its `workers.dev` hostname in Zero Trust. Add an allow policy for your account.
+3. Optionally add a custom domain to the Worker and protect it with the same Access application.
 4. Set `CLOUDFLARE_ACCESS_TEAM_DOMAIN` and `CLOUDFLARE_ACCESS_AUD` in `apps/web/wrangler.jsonc`. Use the team URL (`https://<team>.cloudflareaccess.com`) and the Access application's AUD tag.
 5. Build and deploy again to apply the Access configuration.
 
